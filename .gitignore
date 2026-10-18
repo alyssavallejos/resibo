@@ -9,6 +9,7 @@ build/
 dist/
 web/dist/
 functions/lib/
+brag-output/
 
 # Android & Gradle
 **/.gradle/
@@ -36,7 +37,11 @@ Thumbs.db
 .firebase/
 .npm
 
-# Secrets
+# Secrets & Keystores
 .env
 .env.local
 .env.*.local
+*.jks
+**/*.jks
+*.keystore
+**/*.keystore
