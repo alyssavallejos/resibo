@@ -71,7 +71,10 @@ class PaymentsViewModel : ViewModel() {
                         val list = snapshot.documents.mapNotNull { doc ->
                             doc.data?.let { Payment.fromSnapshot(doc.id, it) }
                         }
-                        val combined = (list + localPayments).distinctBy { it.referenceNumber ?: it.id }
+                        // Remove any local optimistic items that are already in the remote list
+                        localPayments.removeAll { local -> list.any { it.id == local.id } }
+                        // Deduplicate ONLY by document ID so ALL received transactions stay in POS & Sales
+                        val combined = (list + localPayments).distinctBy { it.id }
                         _uiState.value = PaymentsUiState.Success(combined)
                     }
                 }
@@ -103,8 +106,13 @@ class PaymentsViewModel : ViewModel() {
             receivedAt = Timestamp.now(),
             source = "pos"
         )
+        val currentList = when (val s = _uiState.value) {
+            is PaymentsUiState.Success -> s.payments
+            else -> emptyList()
+        }
         localPayments.add(0, posPayment)
-        _uiState.value = PaymentsUiState.Success(localPayments.toList())
+        val combined = (listOf(posPayment) + currentList).distinctBy { it.id }
+        _uiState.value = PaymentsUiState.Success(combined)
 
         // Announce sale via voice soundbox
         com.resibo.app.audio.PaymentAudioAnnouncer.announcePayment(
@@ -142,8 +150,13 @@ class PaymentsViewModel : ViewModel() {
             receivedAt = Timestamp.now(),
             source = "simulated"
         )
+        val currentList = when (val s = _uiState.value) {
+            is PaymentsUiState.Success -> s.payments
+            else -> emptyList()
+        }
         localPayments.add(0, simPayment)
-        _uiState.value = PaymentsUiState.Success(localPayments.toList())
+        val combined = (listOf(simPayment) + currentList).distinctBy { it.id }
+        _uiState.value = PaymentsUiState.Success(combined)
 
         PaymentSimulator.simulatePayment(
             context = context,

@@ -31,10 +31,14 @@ class PaymentNotificationListener : NotificationListenerService() {
             // Clean up old entries
             recentPayments.entries.removeIf { now - it.value > DEDUP_WINDOW_MS }
 
-            val key = if (!refNumber.isNullOrBlank()) {
-                "$provider:$refNumber"
+            // Account / Card ending (e.g. 4 digits like "2894") is NOT a unique transaction reference!
+            val isUniqueRef = !refNumber.isNullOrBlank() && refNumber.length >= 6
+
+            val key = if (isUniqueRef) {
+                "$provider:$amount:$refNumber"
             } else {
-                "$provider:$amount:${now / DEDUP_WINDOW_MS}"
+                // Short 5-second window for exact same provider and amount to debounce dual push notifications
+                "$provider:$amount:${now / 5000L}"
             }
 
             if (recentPayments.containsKey(key)) {

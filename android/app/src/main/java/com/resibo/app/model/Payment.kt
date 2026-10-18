@@ -25,13 +25,17 @@ data class Payment(
     companion object {
         fun fromSnapshot(id: String, data: Map<String, Any?>): Payment {
             val amountNum = data["amount"] as? Number
+            val timestamp = (data["receivedAt"] as? Timestamp)
+                ?: (data["timestamp"] as? Timestamp)
+                ?: (data["createdAt"] as? Timestamp)
+                ?: Timestamp.now()
             return Payment(
                 id = id,
                 provider = data["provider"] as? String ?: "gcash",
                 amount = amountNum?.toDouble() ?: 0.0,
                 senderNameMasked = data["senderNameMasked"] as? String ?: "",
                 referenceNumber = data["referenceNumber"] as? String,
-                receivedAt = data["receivedAt"] as? Timestamp,
+                receivedAt = timestamp,
                 source = data["source"] as? String ?: "notification"
             )
         }
