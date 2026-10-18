@@ -44,6 +44,8 @@ data class ExtractedInfo(
     val recipientName: String = "",
     val recipientNumberLast4: String = "",
     val senderName: String = "",
+    val senderAccountLast4: String = "",
+    val destinationBank: String = "",
     val transactionStatus: String = "successful"
 )
 
@@ -106,6 +108,8 @@ data class Receipt(
                     recipientName = it["recipient_name"] as? String ?: "",
                     recipientNumberLast4 = it["recipient_number_last4"] as? String ?: "",
                     senderName = it["sender_name"] as? String ?: "",
+                    senderAccountLast4 = it["sender_account_last4"] as? String ?: "",
+                    destinationBank = it["destination_bank"] as? String ?: "",
                     transactionStatus = it["transaction_status"] as? String ?: "successful"
                 )
             }

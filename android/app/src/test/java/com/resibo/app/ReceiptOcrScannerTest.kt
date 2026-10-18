@@ -149,4 +149,103 @@ class ReceiptOcrScannerTest {
         assertEquals(ReceiptVerdict.FRAUD_RECEIPT, verified.verdict)
         assertTrue(verified.reasons.any { it.contains("Maling halaga") })
     }
+
+    @Test
+    fun testInterbankInstaPayVerificationSuccess() = runBlocking {
+        // Real case: UnionBank payment sent to MariBank account
+        // Notification says: "Transfer from Union Bank ... PHP 21.00 account ending 2894"
+        val receipt = Receipt(
+            id = "rec_ub_to_mari",
+            buyerName = "Jhon Lloyd Cabahug",
+            expectedAmount = 21.0,
+            channel = "online",
+            extracted = ExtractedInfo(
+                provider = "UNIONBANK",
+                amount = 21.0,
+                senderName = "JHON LLOYD GALVE CABAHUG",
+                senderAccountLast4 = "2894",
+                destinationBank = "MARIBANK",
+                referenceNumber = "UB660079"
+            )
+        )
+
+        val payments = listOf(
+            Payment(
+                id = "pay_mari_1",
+                provider = "maribank",
+                amount = 21.0,
+                senderNameMasked = "Union Bank",
+                referenceNumber = "2894" // ending 2894
+            )
+        )
+
+        val verified = ReceiptOcrScanner.scanAndVerify(receipt, emptyList(), payments)
+        assertEquals(ReceiptVerdict.RECEIPT_RECEIVED, verified.verdict)
+        assertEquals("interbank_instapay", verified.matchMethod)
+        assertTrue(verified.reasons.any { it.contains("Kumpirmadong Interbank Transfer") })
+    }
+
+    @Test
+    fun testInterbankInstaPayBankMismatchDetected() = runBlocking {
+        // Notification arrived from Union Bank, but buyer uploaded a BDO receipt
+        val receipt = Receipt(
+            id = "rec_bdo_fake",
+            buyerName = "Jhon Lloyd Cabahug",
+            expectedAmount = 21.0,
+            channel = "online",
+            extracted = ExtractedInfo(
+                provider = "BDO",
+                amount = 21.0,
+                senderName = "Jhon Lloyd Cabahug",
+                senderAccountLast4 = "1111",
+                destinationBank = "MARIBANK",
+                referenceNumber = "BDO998877"
+            )
+        )
+
+        val payments = listOf(
+            Payment(
+                id = "pay_mari_1",
+                provider = "maribank",
+                amount = 21.0,
+                senderNameMasked = "Union Bank",
+                referenceNumber = "2894"
+            )
+        )
+
+        val verified = ReceiptOcrScanner.scanAndVerify(receipt, emptyList(), payments)
+        assertEquals(ReceiptVerdict.FRAUD_RECEIPT, verified.verdict)
+        assertTrue(verified.reasons.any { it.contains("Hindi tumutugma ang bangko") })
+    }
+
+    @Test
+    fun testUnionBankReceiptOcrParsing() {
+        val sampleUnionBankReceipt = """
+            UnionBank
+            Transfer Successful
+            PHP 21.00
+            From
+            Classic Savings
+            **** **** **** 2894
+            JHON LLOYD GALVE CABAHUG
+            To
+            Maribank
+            1640 1860 602
+            CASA DE JL
+            ReferenceNumber
+            UB660079
+            InstaPay Reference: 759796
+            18 Oct 2026, 11:34 PM
+        """.trimIndent()
+
+        val extracted = ReceiptOcrScanner.parseReceiptText(sampleUnionBankReceipt, 21.0, "Jhon Lloyd Cabahug")
+
+        assertEquals("UNIONBANK", extracted.provider)
+        assertEquals("MARIBANK", extracted.destinationBank)
+        assertEquals(21.0, extracted.amount, 0.01)
+        assertEquals("JHON LLOYD GALVE CABAHUG", extracted.senderName)
+        assertEquals("2894", extracted.senderAccountLast4)
+        assertEquals("UB660079", extracted.referenceNumber)
+        assertFalse("Reference number should not be 'erenceNumber'", extracted.referenceNumber.equals("erenceNumber", ignoreCase = true))
+    }
 }

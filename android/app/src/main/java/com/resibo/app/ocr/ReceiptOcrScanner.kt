@@ -82,42 +82,106 @@ object ReceiptOcrScanner {
 
         val text = rawText.replace("\r", "")
         val lines = text.split("\n").map { it.trim() }.filter { it.isNotBlank() }
-
-        // 1. Detect Provider
-        var provider = "UNKNOWN"
         val lowerText = text.lowercase()
-        when {
-            lowerText.contains("maribank") || lowerText.contains("shopeepay") -> provider = "MARIBANK"
-            lowerText.contains("seabank") -> provider = "SEABANK"
-            lowerText.contains("gcash") -> provider = "GCASH"
-            lowerText.contains("maya") || lowerText.contains("paymaya") -> provider = "MAYA"
-            lowerText.contains("bpi") -> provider = "BPI"
-            lowerText.contains("bdo") -> provider = "BDO"
-            lowerText.contains("unionbank") -> provider = "UNIONBANK"
-            lowerText.contains("gotyme") -> provider = "GOTYME"
-            lowerText.contains("dbp") -> provider = "DBP"
-            lowerText.contains("landbank") -> provider = "LANDBANK"
-            lowerText.contains("metrobank") -> provider = "METROBANK"
-            lowerText.contains("rcbc") -> provider = "RCBC"
-        }
 
-        // 2. Detect Reference Number
-        var refNumber: String? = null
-
-        // (a) Common regex: "Reference Number: BC550000034535407831", "Ref No. 1029 3847 5610"
-        val refPattern = Pattern.compile(
-            "(?:Reference[ \\t]*(?:Number|No\\.?|ID)|Ref(?:\\.|[ \\t]*No\\.?|[ \\t]*ID)?|Trans(?:action)?[ \\t]*ID)[ \\t:]*([A-Za-z0-9 \\t]{8,30})",
-            Pattern.CASE_INSENSITIVE
-        )
-        val matcher = refPattern.matcher(text)
-        if (matcher.find()) {
-            val candidate = matcher.group(1)?.substringBefore("\n")?.substringBefore("\r")?.replace(" ", "")?.trim()
-            if (!candidate.isNullOrBlank() && candidate.length >= 8) {
-                refNumber = candidate
+        // 1. Detect Destination Bank (e.g. "To: Maribank" or "Destination Bank: Maya")
+        var destinationBank = ""
+        for (i in lines.indices) {
+            val line = lines[i]
+            val lower = line.lowercase()
+            if (lower == "to" || lower.startsWith("to:") || lower.startsWith("recipient bank") ||
+                lower.startsWith("destination bank") || lower.startsWith("transfer to") || lower.startsWith("sent to")) {
+                val destCandidate = if (lower == "to" || lower == "transfer to" || lower == "sent to") {
+                    if (i + 1 < lines.size) lines[i + 1] else ""
+                } else {
+                    line.substringAfter(":").trim()
+                }
+                val destLower = destCandidate.lowercase()
+                when {
+                    destLower.contains("maribank") || destLower.contains("shopee") -> destinationBank = "MARIBANK"
+                    destLower.contains("seabank") -> destinationBank = "SEABANK"
+                    destLower.contains("gcash") -> destinationBank = "GCASH"
+                    destLower.contains("maya") -> destinationBank = "MAYA"
+                    destLower.contains("unionbank") || destLower.contains("union bank") -> destinationBank = "UNIONBANK"
+                    destLower.contains("bdo") -> destinationBank = "BDO"
+                    destLower.contains("bpi") -> destinationBank = "BPI"
+                    destLower.contains("gotyme") -> destinationBank = "GOTYME"
+                    destLower.contains("landbank") -> destinationBank = "LANDBANK"
+                    destLower.contains("metrobank") -> destinationBank = "METROBANK"
+                    destLower.contains("rcbc") -> destinationBank = "RCBC"
+                    destLower.contains("chinabank") || destLower.contains("china bank") -> destinationBank = "CHINABANK"
+                }
+                if (destinationBank.isNotBlank()) break
             }
         }
 
-        // (b) MariBank specific prefix: BC followed by 16-20 digits
+        // Helper to detect bank from snippet
+        fun detectBankFromSnippet(s: String): String? {
+            val l = s.lowercase()
+            return when {
+                l.contains("unionbank") || l.contains("union bank") || l.contains("ub online") || l.contains("ubp") -> "UNIONBANK"
+                l.contains("gotyme") || l.contains("go tyme") -> "GOTYME"
+                l.contains("gcash") -> "GCASH"
+                l.contains("maya") || l.contains("paymaya") -> "MAYA"
+                l.contains("seabank") -> "SEABANK"
+                l.contains("maribank") || l.contains("shopeepay") -> "MARIBANK"
+                l.contains("bdo") || l.contains("bdo unibank") -> "BDO"
+                l.contains("bpi") || l.contains("bank of the philippine islands") -> "BPI"
+                l.contains("landbank") || l.contains("land bank") -> "LANDBANK"
+                l.contains("metrobank") || l.contains("metropolitan bank") -> "METROBANK"
+                l.contains("rcbc") -> "RCBC"
+                l.contains("chinabank") || l.contains("china bank") -> "CHINABANK"
+                l.contains("security bank") || l.contains("secb") -> "SECURITYBANK"
+                l.contains("pnb") -> "PNB"
+                l.contains("eastwest") || l.contains("east west") -> "EASTWEST"
+                l.contains("dbp") -> "DBP"
+                else -> null
+            }
+        }
+
+        // 2. Detect Issuing Provider (Source Bank / Wallet)
+        var provider = "UNKNOWN"
+        val headerSnippet = lines.take(5).joinToString(" ")
+        val headerBank = detectBankFromSnippet(headerSnippet)
+        if (headerBank != null && headerBank != destinationBank) {
+            provider = headerBank
+        } else {
+            // Check lines before "To"
+            val toIndex = lines.indexOfFirst { it.equals("To", ignoreCase = true) || it.startsWith("To:", ignoreCase = true) }
+            val beforeToSnippet = if (toIndex > 0) lines.take(toIndex).joinToString(" ") else ""
+            val beforeToBank = detectBankFromSnippet(beforeToSnippet)
+            if (beforeToBank != null && beforeToBank != destinationBank) {
+                provider = beforeToBank
+            } else {
+                val fullTextBank = detectBankFromSnippet(lowerText)
+                if (fullTextBank != null) {
+                    provider = fullTextBank
+                } else if (destinationBank.isNotBlank()) {
+                    provider = destinationBank
+                }
+            }
+        }
+
+        // 3. Detect Reference Number / Transaction ID
+        var refNumber: String? = null
+
+        // (a) Dedicated UnionBank pattern (UB followed by 6-12 digits e.g. UB660079)
+        val ubRefPattern = Pattern.compile("\\b(UB[0-9]{6,12})\\b", Pattern.CASE_INSENSITIVE)
+        val ubMatcher = ubRefPattern.matcher(text)
+        if (ubMatcher.find()) {
+            refNumber = ubMatcher.group(1)?.uppercase()
+        }
+
+        // (b) Dedicated InstaPay Trace / Reference pattern
+        if (refNumber == null) {
+            val instaRefPattern = Pattern.compile("(?:InstaPay\\s*(?:Reference\\s*(?:Number|No\\.?)|Ref\\s*(?:No\\.?|ID)|Trace\\s*No\\.?)?)\\s*[:.]?\\s*([0-9]{6,18})", Pattern.CASE_INSENSITIVE)
+            val instaMatcher = instaRefPattern.matcher(text)
+            if (instaMatcher.find()) {
+                refNumber = instaMatcher.group(1)?.trim()
+            }
+        }
+
+        // (c) MariBank BC pattern (BC followed by 14-22 digits)
         if (refNumber == null) {
             val mariRefPattern = Pattern.compile("\\b(BC\\d{14,22})\\b", Pattern.CASE_INSENSITIVE)
             val mariMatcher = mariRefPattern.matcher(text)
@@ -126,14 +190,44 @@ object ReceiptOcrScanner {
             }
         }
 
-        // (c) Line-based lookup: If a line says "Reference Number", inspect the next line
+        // (d) Maya prefix pattern (MAYA followed by 6-16 alphanumerics)
+        if (refNumber == null) {
+            val mayaRefPattern = Pattern.compile("\\b(MAYA[A-Za-z0-9]{6,16})\\b", Pattern.CASE_INSENSITIVE)
+            val mayaMatcher = mayaRefPattern.matcher(text)
+            if (mayaMatcher.find()) {
+                refNumber = mayaMatcher.group(1)?.uppercase()
+            }
+        }
+
+        // (e) Standard Reference Number pattern with word boundaries and negative check
+        if (refNumber == null) {
+            val refPattern = Pattern.compile(
+                "\\b(?:Reference\\s*(?:Number|No\\.?|ID)?|Ref\\s*(?:No\\.?|ID)|Ref\\.|Trans(?:action)?\\s*ID|Trace\\s*(?:No\\.?|Number)?)\\s*[:.]?\\s*([A-Za-z0-9 \\t]{6,32})",
+                Pattern.CASE_INSENSITIVE
+            )
+            val matcher = refPattern.matcher(text)
+            if (matcher.find()) {
+                val candidate = matcher.group(1)?.substringBefore("\n")?.substringBefore("\r")?.replace(" ", "")?.trim()
+                if (!candidate.isNullOrBlank() && candidate.length >= 6 &&
+                    !candidate.contains("erence", ignoreCase = true) &&
+                    !candidate.contains("number", ignoreCase = true) &&
+                    !candidate.contains("reference", ignoreCase = true)) {
+                    refNumber = candidate
+                }
+            }
+        }
+
+        // (f) Line-based lookup: If a line matches Reference/Ref, inspect the next line
         if (refNumber == null) {
             for (i in lines.indices) {
                 val line = lines[i]
-                if (line.contains("Reference", ignoreCase = true) || line.contains("Ref No", ignoreCase = true)) {
+                if (line.matches(Regex(".*\\b(?:Reference(\\s*Number|\\s*No\\.?)?|Ref(\\s*No\\.?|\\.)|InstaPay\\s*Ref(erence)?)\\b.*", RegexOption.IGNORE_CASE))) {
                     if (i + 1 < lines.size) {
                         val nextCandidate = lines[i + 1].replace(" ", "").trim()
-                        if (nextCandidate.length >= 8 && nextCandidate.all { it.isLetterOrDigit() }) {
+                        if (nextCandidate.length >= 6 && nextCandidate.all { it.isLetterOrDigit() } &&
+                            !nextCandidate.contains("erence", ignoreCase = true) &&
+                            !nextCandidate.contains("number", ignoreCase = true) &&
+                            !nextCandidate.contains("reference", ignoreCase = true)) {
                             refNumber = nextCandidate
                             break
                         }
@@ -142,7 +236,7 @@ object ReceiptOcrScanner {
             }
         }
 
-        // (d) Generic numeric reference (GCash/Maya 10-16 digits)
+        // (g) Generic numeric reference (GCash/Maya 10-16 digits)
         if (refNumber == null) {
             val numRefPattern = Pattern.compile("\\b(\\d{4}\\s*\\d{4}\\s*\\d{4,6})\\b")
             val numMatcher = numRefPattern.matcher(text)
@@ -151,7 +245,7 @@ object ReceiptOcrScanner {
             }
         }
 
-        // 3. Detect Amount
+        // 4. Detect Amount
         var detectedAmount: Double = expectedAmount ?: 0.0
         val amtPattern = Pattern.compile(
             "(?:Total\\s*Amount|Transfer\\s*Amount|Amount|PHP|₱)[\\s:]*(?:PHP|₱)?\\s*([0-9,]+\\.[0-9]{2})",
@@ -175,58 +269,102 @@ object ReceiptOcrScanner {
             }
         }
 
-        // 4. Sender Name Extraction (Same-line and Next-line detection)
+        // 5. Sender Name & Sender Account Last 4 Extraction
         var senderName = fallbackSender
+        var senderAccountLast4 = ""
+        val genericAccountKeywords = setOf(
+            "CLASSIC SAVINGS", "SAVINGS", "SAVINGS ACCOUNT", "CURRENT ACCOUNT",
+            "EPAYCARD", "PAYCARD", "CHECKING", "CHECKING ACCOUNT", "WALLET",
+            "ACCOUNT", "SOURCE ACCOUNT", "PESO ACCOUNT", "DEPOSIT ACCOUNT"
+        )
+
         for (i in lines.indices) {
             val line = lines[i]
-            // Inline check: "From: JUAN DELA CRUZ"
+
+            // Look for card / account ending (e.g. **** 2894 or 1234 5678 2894)
+            val cardMatcher = Pattern.compile("(?:[•*xX]{2,}\\s*|[0-9]{4}\\s+)([0-9]{4})\\b").matcher(line)
+            if (cardMatcher.find() && senderAccountLast4.isBlank()) {
+                senderAccountLast4 = cardMatcher.group(1) ?: ""
+            }
+
+            // Inline check: "From: JHON LLOYD GALVE CABAHUG"
             val inlineMatcher = Pattern.compile(
                 "^(?:From|Sender|Sent\\s+by|Mula\\s+kay|Source\\s+Account|Account\\s+Name)[\\s:]+(.+)$",
                 Pattern.CASE_INSENSITIVE
             ).matcher(line)
             if (inlineMatcher.find()) {
                 val candidate = inlineMatcher.group(1)
-                    ?.replace(Regex("^(MariBank|GCash|Maya|Acct).*"), "")
+                    ?.replace(Regex("(?i)^(MariBank|GCash|Maya|Acct|Classic\\s+Savings).*"), "")
                     ?.replace(Regex("[0-9*]{4,}"), "")
                     ?.trim() ?: ""
-                if (candidate.isNotBlank() && candidate.length > 2) {
+                if (candidate.isNotBlank() && candidate.length > 2 && candidate.any { it.isLetter() } &&
+                    !genericAccountKeywords.contains(candidate.uppercase())) {
                     senderName = candidate
                     break
                 }
             }
-            // Next-line check: "From\nJUAN DELA CRUZ"
-            if ((line.equals("From", ignoreCase = true) ||
-                 line.equals("Sender", ignoreCase = true) ||
-                 line.equals("Sent by", ignoreCase = true) ||
-                 line.equals("Mula kay", ignoreCase = true)) && i + 1 < lines.size) {
-                val candidate = lines[i + 1]
-                    .replace(Regex("^(MariBank|GCash|Maya|Acct).*"), "")
-                    .replace(Regex("[0-9*]{4,}"), "")
-                    .trim()
-                if (candidate.isNotBlank() && candidate.length > 2) {
-                    senderName = candidate
-                    break
+
+            // Next-lines check: "From" followed by account type, card number, then human name
+            if (line.equals("From", ignoreCase = true) ||
+                line.equals("Sender", ignoreCase = true) ||
+                line.equals("Sent by", ignoreCase = true) ||
+                line.equals("Mula kay", ignoreCase = true)) {
+
+                for (offset in 1..4) {
+                    if (i + offset >= lines.size) break
+                    val nextLine = lines[i + offset].trim()
+
+                    val nextCardMatcher = Pattern.compile("(?:[•*xX]{2,}\\s*|[0-9]{4}\\s+)([0-9]{4})\\b").matcher(nextLine)
+                    if (nextCardMatcher.find() && senderAccountLast4.isBlank()) {
+                        senderAccountLast4 = nextCardMatcher.group(1) ?: ""
+                    }
+
+                    val candidate = nextLine
+                        .replace(Regex("(?i)^(MariBank|GCash|Maya|Acct|UnionBank).*"), "")
+                        .replace(Regex("[0-9*]{4,}"), "")
+                        .trim()
+
+                    val upperCandidate = candidate.uppercase()
+                    if (candidate.isNotBlank() && candidate.length > 2 && candidate.any { it.isLetter() } &&
+                        !genericAccountKeywords.contains(upperCandidate) &&
+                        !upperCandidate.startsWith("PHP") &&
+                        !upperCandidate.startsWith("TO") &&
+                        !upperCandidate.contains("ACCOUNT")) {
+                        senderName = candidate
+                        break
+                    }
                 }
+                if (senderName.isNotBlank() && senderName != fallbackSender) break
             }
         }
 
-        // 5. Recipient Name & Account Last 4
+        // 6. Recipient Name & Account Last 4
         var recipientName = ""
         var recipientLast4 = ""
         for (i in lines.indices) {
-            if (lines[i].equals("To", ignoreCase = true) && i + 1 < lines.size) {
-                recipientName = lines[i + 1]
-            }
-            val acctMatcher = Pattern.compile("(?:(?:Acct\\.?\\s*No\\.?|Account\\s*No\\.?)[\\s:•*xX-]*|[•*xX]{2,}\\s*)([0-9]{4,})", Pattern.CASE_INSENSITIVE).matcher(lines[i])
-            if (acctMatcher.find()) {
-                val acct = acctMatcher.group(1) ?: ""
-                if (acct.length >= 4) {
-                    recipientLast4 = acct.takeLast(4)
+            val line = lines[i]
+            if ((line.equals("To", ignoreCase = true) || line.startsWith("To:", ignoreCase = true)) && i + 1 < lines.size) {
+                for (offset in 1..3) {
+                    if (i + offset >= lines.size) break
+                    val targetLine = lines[i + offset].trim()
+                    if (recipientLast4.isBlank()) {
+                        val acctMatcher = Pattern.compile("(?:(?:Acct\\.?\\s*No\\.?|Account\\s*No\\.?)[\\s:•*xX-]*|[•*xX]{2,}\\s*|\\b\\d{4}\\s+\\d{4}\\s+)([0-9]{3,4})\\b", Pattern.CASE_INSENSITIVE).matcher(targetLine)
+                        if (acctMatcher.find()) {
+                            recipientLast4 = acctMatcher.group(1) ?: ""
+                        }
+                    }
+                    if (recipientName.isBlank() && targetLine.any { it.isLetter() } &&
+                        !targetLine.equals("Maribank", ignoreCase = true) &&
+                        !targetLine.equals("ShopeePay", ignoreCase = true) &&
+                        !targetLine.equals("GCash", ignoreCase = true) &&
+                        !targetLine.equals("Maya", ignoreCase = true)) {
+                        recipientName = targetLine
+                    }
                 }
             }
         }
 
-        // 6. Date & Time
+        // 7. Date & Time
         var dateTime = ""
         val datePattern = Pattern.compile("(\\d{1,2}\\s+[A-Za-z]{3}\\s+\\d{4}[,\\s]+\\d{1,2}:\\d{2})")
         val dateMatcher = datePattern.matcher(text)
@@ -242,6 +380,8 @@ object ReceiptOcrScanner {
             recipientName = recipientName,
             recipientNumberLast4 = recipientLast4,
             senderName = senderName.ifBlank { fallbackSender },
+            senderAccountLast4 = senderAccountLast4,
+            destinationBank = destinationBank,
             transactionStatus = "SUCCESSFUL"
         )
     }
@@ -441,6 +581,107 @@ object ReceiptOcrScanner {
         )
     }
 
+    fun isInstitutionalSender(name: String?): Boolean {
+        if (name.isNullOrBlank()) return false
+        val clean = name.trim().uppercase()
+        val institutions = listOf(
+            "UNION BANK", "UNIONBANK", "UBP",
+            "BDO", "BANCO DE ORO",
+            "BPI", "BANK OF THE PHILIPPINE ISLANDS",
+            "METROBANK", "METROPOLITAN BANK",
+            "LANDBANK", "LAND BANK",
+            "RCBC", "RIZAL COMMERCIAL",
+            "SECURITY BANK", "SECB",
+            "CHINA BANK", "CHINABANK",
+            "PNB", "PHILIPPINE NATIONAL BANK",
+            "EASTWEST", "EAST WEST",
+            "SEABANK", "MARIBANK", "SHOPEEPAY",
+            "GOTYME", "GO TYME",
+            "CIMB", "KOMO", "DISKARTECH",
+            "MAYA BANK", "PAYMAYA",
+            "DBP", "DEVELOPMENT BANK",
+            "ASIA UNITED BANK", "AUB",
+            "PSBANK", "PHILTRUST", "ROBINSONS BANK",
+            "BANK TRANSFER", "INSTAPAY", "PESONET"
+        )
+        return institutions.any { inst ->
+            clean == inst || clean.startsWith("$inst ") || clean.endsWith(" $inst") || clean.contains(inst)
+        }
+    }
+
+    fun isInstitutionalPaymentMatch(
+        payment: Payment,
+        extracted: ExtractedInfo,
+        receiptText: String = "",
+        receiptAmount: Double
+    ): NameMatchResult {
+        val amtDiff = Math.abs(payment.amount - receiptAmount)
+        if (amtDiff > 1.0 && receiptAmount > 0.0) {
+            return NameMatchResult(
+                false,
+                "AMOUNT_MISMATCH",
+                "Hindi tugma ang halaga sa resibo (₱${String.format(Locale.US, "%.2f", receiptAmount)}) vs natanggap (₱${String.format(Locale.US, "%.2f", payment.amount)})."
+            )
+        }
+
+        val senderInst = payment.senderNameMasked.uppercase().trim()
+        val provider = extracted.provider.uppercase().trim()
+        val lowerText = receiptText.lowercase()
+
+        // 1. Account / Card ending match (e.g. "2894" in payment.referenceNumber matches receipt senderAccountLast4)
+        val normPayRef = normalizeRef(payment.referenceNumber)
+        val senderLast4 = extracted.senderAccountLast4.trim()
+        if (senderLast4.isNotBlank() && normPayRef.isNotBlank() && (normPayRef == senderLast4 || normPayRef.endsWith(senderLast4) || senderLast4.endsWith(normPayRef))) {
+            return NameMatchResult(
+                true,
+                "ACCOUNT_LAST4",
+                "Kumpirmadong InstaPay transfer mula sa $senderInst (account ending $senderLast4). Tugma ang card/account sa resibo."
+            )
+        }
+
+        // 2. Direct Bank Provider Match
+        val providerMatches = when {
+            senderInst.contains("UNION") && (provider == "UNIONBANK" || lowerText.contains("unionbank") || lowerText.contains("union bank") || lowerText.contains("ub online")) -> true
+            senderInst.contains("BDO") && (provider == "BDO" || lowerText.contains("bdo")) -> true
+            senderInst.contains("BPI") && (provider == "BPI" || lowerText.contains("bpi")) -> true
+            senderInst.contains("METROBANK") && (provider == "METROBANK" || lowerText.contains("metrobank")) -> true
+            senderInst.contains("LANDBANK") && (provider == "LANDBANK" || lowerText.contains("landbank")) -> true
+            senderInst.contains("GOTYME") && (provider == "GOTYME" || lowerText.contains("gotyme")) -> true
+            senderInst.contains("SEABANK") && (provider == "SEABANK" || lowerText.contains("seabank")) -> true
+            senderInst.contains("MARIBANK") && (provider == "MARIBANK" || lowerText.contains("maribank")) -> true
+            senderInst.contains("MAYA") && (provider == "MAYA" || lowerText.contains("maya")) -> true
+            senderInst.contains("GCASH") && (provider == "GCASH" || lowerText.contains("gcash")) -> true
+            senderInst.contains("RCBC") && (provider == "RCBC" || lowerText.contains("rcbc")) -> true
+            senderInst.contains("CHINA") && (provider == "CHINABANK" || lowerText.contains("chinabank") || lowerText.contains("china bank")) -> true
+            senderInst.contains("SECURITY") && (provider == "SECURITYBANK" || lowerText.contains("security bank")) -> true
+            provider != "UNKNOWN" && (senderInst.contains(provider) || provider.contains(senderInst)) -> true
+            else -> false
+        }
+
+        if (providerMatches) {
+            return NameMatchResult(
+                true,
+                "INSTAPAY_BANK",
+                "Kumpirmadong Interbank InstaPay transfer mula sa $senderInst. Natanggap sa ${payment.provider.uppercase()} ang halagang ₱${String.format(Locale.US, "%.2f", payment.amount)}."
+            )
+        }
+
+        // 3. Fallback: Does receipt text explicitly name the sending institution?
+        if (lowerText.contains(senderInst.lowercase())) {
+            return NameMatchResult(
+                true,
+                "INSTAPAY_TEXT",
+                "Natanggap ang InstaPay transfer mula sa $senderInst."
+            )
+        }
+
+        return NameMatchResult(
+            false,
+            "NONE",
+            "Hindi tumutugma ang sending bank ('$senderInst') sa resibo."
+        )
+    }
+
     suspend fun scanAndVerify(
         receipt: Receipt,
         existingReceipts: List<Receipt> = emptyList(),
@@ -450,12 +691,13 @@ object ReceiptOcrScanner {
         val fraudReasons = mutableListOf<String>()
 
         // 1. Decode bitmap or reuse existing extracted data
+        var rawOcrText = ""
         val extracted: ExtractedInfo
         val imageSource = receipt.imageUrl.ifBlank { receipt.imagePath }
         if (imageSource.isNotBlank()) {
             val bitmap = decodeBitmap(imageSource)
             if (bitmap != null) {
-                val rawOcrText = scanText(bitmap)
+                rawOcrText = scanText(bitmap)
                 extracted = if (rawOcrText.isNotBlank()) {
                     parseReceiptText(rawOcrText, receipt.expectedAmount, receipt.buyerName)
                 } else {
@@ -537,7 +779,7 @@ object ReceiptOcrScanner {
             fraudReasons.add("Pekeng Resibo (Fraud): Walang wastong halaga ng bayad.")
         }
 
-        // 7. ONLINE TRANSACTION: Verify based on Name / Sender (From) and Amount (with Masked Logic Reasoning)
+        // 7. ONLINE TRANSACTION: Verify based on Name / Sender (From) and Amount (with Masked Logic Reasoning & Interbank Handling)
         val isOnline = receipt.isOnlineTransaction
         var matchedPayment: Payment? = null
         var isSenderNameVerified = false
@@ -551,11 +793,9 @@ object ReceiptOcrScanner {
             ).distinct()
             val primaryBuyerName = candidateReceiptNames.firstOrNull() ?: "Hindi Kilalang Mamimili"
 
-            // Look for matching payment in incomingPayments:
             var bestCandidate: Payment? = null
             var bestCandidateNameResult: NameMatchResult? = null
 
-            // Tracking potential mismatches to provide clear and actionable fraud reasons
             var paymentWithSameAmountDifferentName: Payment? = null
             var paymentWithSameNameDifferentAmount: Payment? = null
 
@@ -563,14 +803,19 @@ object ReceiptOcrScanner {
                 val amtDiff = Math.abs(payment.amount - receiptAmount)
                 val isAmtMatch = amtDiff <= 1.0 || receiptAmount <= 0.0
 
-                // Test if any candidate name matches payment.senderNameMasked using masked logical reasoning
-                var nameResult = NameMatchResult(false, "NONE", "")
-                for (cName in candidateReceiptNames) {
-                    val r = isSenderNameSimilar(cName, payment.senderNameMasked)
-                    if (r.matches) {
-                        nameResult = r
-                        break
+                val isInst = isInstitutionalSender(payment.senderNameMasked)
+                val nameResult: NameMatchResult = if (isInst) {
+                    isInstitutionalPaymentMatch(payment, extracted, rawOcrText, receiptAmount)
+                } else {
+                    var bestRes = NameMatchResult(false, "NONE", "")
+                    for (cName in candidateReceiptNames) {
+                        val r = isSenderNameSimilar(cName, payment.senderNameMasked)
+                        if (r.matches) {
+                            bestRes = r
+                            break
+                        }
                     }
+                    bestRes
                 }
 
                 // Reference number match check for bonus confidence
@@ -581,13 +826,16 @@ object ReceiptOcrScanner {
                     normReceiptRef.contains(normPayRef) ||
                     (normPayRef.length >= 8 && normReceiptRef.length >= 8 && normPayRef.takeLast(8) == normReceiptRef.takeLast(8))
                 )
+                val isAccountMatch = extracted.senderAccountLast4.isNotBlank() && normPayRef.isNotBlank() && (
+                    normPayRef == extracted.senderAccountLast4 ||
+                    normPayRef.endsWith(extracted.senderAccountLast4)
+                )
 
                 if (isAmtMatch && nameResult.matches) {
-                    // Both Name and Amount match!
-                    if (bestCandidate == null || isRefMatch) {
+                    if (bestCandidate == null || isRefMatch || isAccountMatch) {
                         bestCandidate = payment
                         bestCandidateNameResult = nameResult
-                        if (isRefMatch) break // Highest confidence match
+                        if (isRefMatch || isAccountMatch) break
                     }
                 } else if (isAmtMatch && !nameResult.matches) {
                     if (paymentWithSameAmountDifferentName == null) {
@@ -604,11 +852,11 @@ object ReceiptOcrScanner {
                 matchedPayment = bestCandidate
                 isSenderNameVerified = true
                 isAmountVerified = true
-                nameMatchDetail = bestCandidateNameResult?.explanation ?: "Tugma ang nagpadala sa natanggap na bayad."
+                nameMatchDetail = bestCandidateNameResult?.explanation ?: "Tugma ang transaksyon sa natanggap na bayad."
 
                 checks.add(
                     CheckInfo(
-                        name = "Sender (From) Name Verified",
+                        name = if (isInstitutionalSender(matchedPayment.senderNameMasked)) "Interbank / InstaPay Transfer Verified" else "Sender (From) Name Verified",
                         passed = true,
                         detail = nameMatchDetail
                     )
@@ -635,48 +883,31 @@ object ReceiptOcrScanner {
                         CheckInfo(
                             name = "Reference Cross-Reference",
                             passed = isRefTied,
-                            detail = if (isRefTied) "Tugma ang reference number ($rawRef)." else "Natanggap ang bayad batay sa Sender Name at Amount."
+                            detail = if (isRefTied) "Tugma ang reference number ($rawRef)." else "Natanggap ang bayad batay sa Sender Name / Channel at Amount."
                         )
                     )
                 }
             } else {
-                // No payment matched both Name and Amount -> FRAUD_RECEIPT
-                checks.add(
-                    CheckInfo(
-                        name = "Sender (From) Name Verified",
-                        passed = false,
-                        detail = if (paymentWithSameAmountDifferentName != null) {
-                            "Hindi tumutugma ang nagpadala! Ayon sa notification, si '${paymentWithSameAmountDifferentName.senderNameMasked}' ang nagbayad, hindi si '$primaryBuyerName'."
-                        } else {
-                            "Walang natanggap na notification mula kay '$primaryBuyerName'."
-                        }
-                    )
-                )
-                checks.add(
-                    CheckInfo(
-                        name = "Amount Match",
-                        passed = false,
-                        detail = if (paymentWithSameNameDifferentAmount != null) {
-                            "Maling halaga! ₱${String.format(Locale.US, "%.2f", receiptAmount)} sa resibo vs ₱${String.format(Locale.US, "%.2f", paymentWithSameNameDifferentAmount.amount)} sa notification."
-                        } else {
-                            "Walang natanggap na pumasok na bayad para sa halagang ₱${String.format(Locale.US, "%.2f", receiptAmount)}."
-                        }
-                    )
-                )
-                checks.add(
-                    CheckInfo(
-                        name = "Bank/Wallet Transfer Received",
-                        passed = false,
-                        detail = "Walang kaukulang pumasok na pera sa telepono ng may-ari para sa nagpadala at halagang ito."
-                    )
-                )
-
+                // No payment matched both Name/Channel and Amount -> FRAUD_RECEIPT
                 if (paymentWithSameAmountDifferentName != null) {
-                    fraudReasons.add("Pekeng Resibo (Fraud): Maling nagpadala! Ang pumasok na bayad sa notification ay mula kay '${paymentWithSameAmountDifferentName.senderNameMasked}' ngunit ang resibo ay para kay '$primaryBuyerName'.")
+                    val differentSender = paymentWithSameAmountDifferentName.senderNameMasked
+                    val isDiffInst = isInstitutionalSender(differentSender)
+                    val msg = if (isDiffInst) {
+                        "Hindi tumutugma ang bangko! Ayon sa notification, pumasok ang pera mula sa '$differentSender', ngunit ang resibo ay mula sa '${extracted.provider}' para kay '$primaryBuyerName'."
+                    } else {
+                        "Maling nagpadala! Ayon sa notification, si '$differentSender' ang nagbayad, hindi si '$primaryBuyerName'."
+                    }
+                    checks.add(CheckInfo("Sender (From) / Channel Verified", false, msg))
+                    fraudReasons.add("Pekeng Resibo (Fraud): $msg")
                 } else if (paymentWithSameNameDifferentAmount != null) {
-                    fraudReasons.add("Pekeng Resibo (Fraud): Maling halaga! Ang sinabi sa resibo ay ₱${String.format(Locale.US, "%.2f", receiptAmount)} ngunit ₱${String.format(Locale.US, "%.2f", paymentWithSameNameDifferentAmount.amount)} lang ang pumasok mula kay '${paymentWithSameNameDifferentAmount.senderNameMasked}'.")
+                    val diffAmt = paymentWithSameNameDifferentAmount.amount
+                    val msg = "Maling halaga! Ang sinabi sa resibo ay ₱${String.format(Locale.US, "%.2f", receiptAmount)} ngunit ₱${String.format(Locale.US, "%.2f", diffAmt)} lang ang pumasok mula kay '${paymentWithSameNameDifferentAmount.senderNameMasked}'."
+                    checks.add(CheckInfo("Amount Match", false, msg))
+                    fraudReasons.add("Pekeng Resibo (Fraud): $msg")
                 } else {
-                    fraudReasons.add("Pekeng Resibo (Fraud): Walang natanggap na notification ang Resibo para kay '$primaryBuyerName' na may halagang ₱${String.format(Locale.US, "%.2f", receiptAmount)}. Hindi pumasok ang pera sa bank o e-wallet.")
+                    val msg = "Walang natanggap na notification ang Resibo para kay '$primaryBuyerName' (${extracted.provider}) na may halagang ₱${String.format(Locale.US, "%.2f", receiptAmount)}. Hindi pumasok ang pera sa bank o e-wallet."
+                    checks.add(CheckInfo("Bank/Wallet Transfer Received", false, msg))
+                    fraudReasons.add("Pekeng Resibo (Fraud): $msg")
                 }
             }
         } else {
@@ -699,10 +930,13 @@ object ReceiptOcrScanner {
 
         val finalReasons = if (finalVerdict == ReceiptVerdict.RECEIPT_RECEIVED) {
             if (isOnline && matchedPayment != null) {
-                listOf(
-                    "✅ Kumpirmadong Natanggap: Tugma ang nagpadala (${receipt.buyerName.ifBlank { extracted.senderName }}) at halagang ₱${String.format(Locale.US, "%.2f", matchedPayment.amount)} sa natanggap na ${matchedPayment.provider.uppercase()} notification.",
-                    nameMatchDetail
-                )
+                val isInst = isInstitutionalSender(matchedPayment.senderNameMasked)
+                val summaryLine = if (isInst) {
+                    "✅ Kumpirmadong Interbank Transfer: Natanggap mula sa ${matchedPayment.senderNameMasked} ang halagang ₱${String.format(Locale.US, "%.2f", matchedPayment.amount)} sa pamamagitan ng ${matchedPayment.provider.uppercase()}."
+                } else {
+                    "✅ Kumpirmadong Natanggap: Tugma ang nagpadala (${receipt.buyerName.ifBlank { extracted.senderName }}) at halagang ₱${String.format(Locale.US, "%.2f", matchedPayment.amount)} sa natanggap na ${matchedPayment.provider.uppercase()} notification."
+                }
+                listOf(summaryLine, nameMatchDetail)
             } else {
                 listOf("✅ In-Store Transaction: Kumpirmadong natanggap sa tindahan.")
             }
@@ -717,7 +951,11 @@ object ReceiptOcrScanner {
             checks = checks,
             reasons = finalReasons,
             matchedPaymentId = matchedPayment?.id ?: receipt.matchedPaymentId,
-            matchMethod = if (finalVerdict == ReceiptVerdict.RECEIPT_RECEIVED) (if (isOnline) "sender_and_amount" else "manual") else "fraud_detection"
+            matchMethod = if (finalVerdict == ReceiptVerdict.RECEIPT_RECEIVED) {
+                if (isOnline) {
+                    if (matchedPayment != null && isInstitutionalSender(matchedPayment.senderNameMasked)) "interbank_instapay" else "sender_and_amount"
+                } else "manual"
+            } else "fraud_detection"
         )
     }
 }
