@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="tl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Resibo — I-upload ang Resibo</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%230f8a5f'><path d='M19 3H5c-1.1 0-2 .9-2 2v14l4-2 4 2 4-2 4 2V5c0-1.1-.9-2-2-2zm-2 10H7v-2h10v2zm0-4H7V7h10v2z'/></svg>" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div class="app-container">
+      <!-- Top Bar -->
+      <header class="app-header">
+        <div class="brand-badge">
+          <div class="brand-logo-icon">🧾</div>
+          <span class="brand-title">Resibo</span>
+        </div>
+        <button id="langToggleBtn" class="lang-toggle-btn" type="button" aria-label="Toggle Language">
+          <span id="langFlag">🇵🇭</span>
+          <span id="langText">English</span>
+        </button>
+      </header>
+
+      <!-- Main Content Area -->
+      <main id="mainContent">
+        <!-- Loading State -->
+        <div id="loadingView" class="card" style="text-align: center; padding: 40px 20px;">
+          <p style="color: var(--text-secondary); font-size: 14px;">Nilo-load ang tindahan...</p>
+        </div>
+
+        <!-- Shop Not Found View -->
+        <div id="notFoundView" class="card not-found-card" style="display: none;">
+          <div class="not-found-icon">🏪❓</div>
+          <h2 id="notFoundTitle" class="shop-name" style="margin-bottom: 8px;">Hindi Mahanap ang Tindahan</h2>
+          <p id="notFoundMsg" class="shop-tagline" style="margin-bottom: 20px;">
+            Ang link na binuksan mo ay hindi umiiral o maling tindahan ang nailagay.
+          </p>
+          <div style="background: #f1f5f9; padding: 12px; border-radius: 8px; font-size: 13px; color: var(--text-secondary); text-align: left;">
+            <strong>Maaaring subukan:</strong>
+            <ul style="margin-top: 6px; padding-left: 18px;">
+              <li>I-verify ang link na ibinigay ng nagbebenta.</li>
+              <li>Halimbawa ng demo shop: <a href="?shop=kape-ni-aling-rosa" style="color: var(--primary); font-weight: 600;">/pay/kape-ni-aling-rosa</a></li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Active Shop Upload View -->
+        <div id="shopView" style="display: none;">
+          <!-- Shop Information Card -->
+          <div class="card shop-hero">
+            <span id="shopPill" class="shop-pill">Verified Merchant</span>
+            <h1 id="shopName" class="shop-name">Kape ni Aling Rosa</h1>
+            <p id="shopTagline" class="shop-tagline">Ipadala ang screenshot ng iyong bayad.</p>
+
+            <div class="accounts-section">
+              <div id="accountsLabel" class="section-label">Mga Tinatanggap na Account</div>
+              <div id="accountsList" class="accounts-grid">
+                <!-- Dynamically populated -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Upload Form Card -->
+          <div class="card">
+            <div id="alertBox" class="alert-error"></div>
+
+            <form id="uploadForm" novalidate>
+              <!-- Dropzone / File Picker -->
+              <div id="dropzone" class="dropzone" tabindex="0">
+                <div class="dropzone-icon">📸</div>
+                <div id="dropzonePrompt" class="dropzone-prompt">Pindutin para pumili ng screenshot o i-drag dito</div>
+                <div id="dropzoneHint" class="dropzone-hint">PNG, JPG, o WEBP (hanggang 5 MB)</div>
+              </div>
+              <input type="file" id="receiptFileInput" class="file-input" accept="image/png,image/jpeg,image/webp,image/heic" />
+
+              <!-- Image Preview Container -->
+              <div id="previewContainer" class="preview-container">
+                <img id="previewImage" class="preview-image" alt="Receipt preview" />
+                <button type="button" id="changePhotoBtn" class="change-photo-btn">Palitan</button>
+              </div>
+
+              <!-- Buyer Name -->
+              <div class="form-group">
+                <label id="buyerNameLabel" for="buyerNameInput" class="form-label">Pangalan ng Nagbayad *</label>
+                <input type="text" id="buyerNameInput" class="form-input" placeholder="Hal. Juan Dela Cruz" required />
+              </div>
+
+              <!-- Expected Amount -->
+              <div class="form-group">
+                <label id="amountLabel" for="amountInput" class="form-label">Halaga ng Binayaran (₱) (Opsyonal)</label>
+                <input type="number" id="amountInput" class="form-input" placeholder="Hal. 150.00" step="0.01" min="0" />
+              </div>
+
+              <!-- Reference Number -->
+              <div class="form-group">
+                <label id="refLabel" for="refInput" class="form-label">Reference Number (Opsyonal - kusa ring babasahin ng system)</label>
+                <input type="text" id="refInput" class="form-input" placeholder="Hal. BC550000034535407831 o 1029384756" />
+              </div>
+
+              <!-- Note -->
+              <div class="form-group">
+                <label id="noteLabel" for="noteInput" class="form-label">Order Note / Binili (Opsyonal)</label>
+                <input type="text" id="noteInput" class="form-input" placeholder="Hal. 2 Iced Latte, Table 3" />
+              </div>
+
+              <!-- Data Privacy Act RA 10173 -->
+              <div class="privacy-box">
+                <div class="privacy-title">
+                  <span>🔒</span>
+                  <span id="privacyNoticeTitle">Abiso sa Data Privacy (RA 10173)</span>
+                </div>
+                <p id="privacyDetailText">
+                  Ang impormasyon at screenshot na iyong isusumite ay gagamitin lamang para kumpirmahin ang iyong bayad. Hindi ito ibabahagi sa iba.
+                </p>
+              </div>
+
+              <!-- Submit Button -->
+              <button type="submit" id="submitBtn" class="btn-primary">
+                <span>📤</span>
+                <span id="submitBtnText">Ipadala ang Resibo</span>
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <!-- Success Confirmation View -->
+        <div id="successView" class="card success-card" style="display: none;">
+          <div class="success-icon-badge">✅</div>
+          <h2 id="successTitle" class="success-title">Natanggap na ang Resibo!</h2>
+          <p id="successMsg" class="success-msg">
+            Natanggap na ng nagbebenta ang iyong resibo at agad itong susuriin. Salamat!
+          </p>
+
+          <div class="status-pill-pending">
+            <span>⏳</span>
+            <span id="statusPendingText">Sinusuri (Pending Check)</span>
+          </div>
+
+          <div id="submittedSummaryBox" style="background: #f8fafc; border: 1px solid var(--border-color); border-radius: 12px; padding: 14px; margin-bottom: 20px; font-size: 13px; text-align: left;">
+            <div><strong>Nagbayad:</strong> <span id="summaryBuyerName">-</span></div>
+            <div id="summaryAmountRow" style="display: none; margin-top: 4px;"><strong>Halaga:</strong> <span id="summaryAmount">-</span></div>
+            <div style="margin-top: 4px;"><strong>Oras:</strong> <span id="summaryTime">-</span></div>
+          </div>
+
+          <button type="button" id="uploadAnotherBtn" class="btn-primary" style="background: var(--bg-card); color: var(--primary); border: 1.5px solid var(--primary); box-shadow: none;">
+            Magpadala ng Iba Pang Resibo
+          </button>
+        </div>
+      </main>
+
+      <!-- Footer -->
+      <footer class="app-footer">
+        Resibo · Powered by AI & Real-time Notification Matching
+      </footer>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

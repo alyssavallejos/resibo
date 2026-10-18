@@ -1,0 +1,7 @@
+<resources>
+    <color name="resibo_primary">#0066EE</color>
+    <color name="resibo_on_primary">#FFFFFF</color>
+    <color name="resibo_primary_container">#E8F1FF</color>
+    <color name="resibo_on_primary_container">#001B44</color>
+    <color name="resibo_background">#F1F3F6</color>
+</resources>

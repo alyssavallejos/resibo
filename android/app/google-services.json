@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "692282780409",
+    "project_id": "resibo-ph",
+    "storage_bucket": "resibo-ph.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:692282780409:android:b484508457072661ac9028",
+        "android_client_info": {
+          "package_name": "com.resibo.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCDoi1vo4R33VWZNkdF2nYrVcPKYI9zPyg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:692282780409:android:52709bfc881374c0ac9028",
+        "android_client_info": {
+          "package_name": "com.resibo.app.debug"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCDoi1vo4R33VWZNkdF2nYrVcPKYI9zPyg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

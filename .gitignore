@@ -1,0 +1,42 @@
+# Dependencies
+**/node_modules/
+node_modules/
+
+# Build outputs
+**/build/
+build/
+**/dist/
+dist/
+web/dist/
+functions/lib/
+
+# Android & Gradle
+**/.gradle/
+.gradle/
+**/local.properties
+local.properties
+**/.idea/
+.idea/
+**/*.iml
+*.iml
+**/*.apk
+*.apk
+**/*.aab
+*.aab
+**/captures/
+
+# OS
+.DS_Store
+**/.DS_Store
+Thumbs.db
+
+# Logs & Debug
+*.log
+**/*.log
+.firebase/
+.npm
+
+# Secrets
+.env
+.env.local
+.env.*.local

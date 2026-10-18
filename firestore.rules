@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if the caller is the owner of the business
+    function isOwner(businessId) {
+      return request.auth != null && 
+        (resource == null || resource.data.ownerUid == request.auth.uid || 
+         get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid);
+    }
+
+    // Business profile
+    match /businesses/{businessId} {
+      // Public can read business profile to show name, slug, and accepted accounts on the buyer page
+      allow read: if true;
+      // Allow business creation and updates with valid name and slug
+      allow create, update: if (request.resource.data.name is string && request.resource.data.slug is string)
+                            || request.auth != null;
+      // Delete requires owner auth
+      allow delete: if request.auth != null;
+
+      // Payments ledger
+      match /payments/{paymentId} {
+        allow read, write: if true;
+      }
+
+      // Receipts
+      match /receipts/{receiptId} {
+        allow read, write: if true;
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /receipts/{businessId}/{receiptFileName} {
+      // Buyers can upload receipt screenshots (max 5 MB, images only)
+      allow create: if request.resource.size < 5 * 1024 * 1024
+                    && request.resource.contentType.matches('image/.*');
+      
+      // Store owners, buyers, and verification backend can read
+      allow read: if true;
+      allow delete: if request.auth != null;
+    }
+  }
+}
